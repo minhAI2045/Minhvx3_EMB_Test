@@ -1,0 +1,110 @@
+
+/*
+ * Copyright 2020 NXP
+ * All rights reserved.
+ *
+ * NXP Confidential. This software is owned or controlled by NXP and may only be
+ * used strictly in accordance with the applicable license terms. By expressly
+ * accepting such terms or by downloading, installing, activating and/or otherwise
+ * using the software, you are agreeing that you have read, and that you agree to
+ * comply with and are bound by, such license terms. If you do not agree to be
+ * bound by the applicable license terms, then you may not retain, install,
+ * activate or otherwise use the software. The production use license in
+ * Section 2.3 is expressly granted for this software.
+ */
+/*
+Description:
+* ==============================================================================================================
+ */
+
+
+#include "Middleware.h"
+#include "sdk_project_config.h"
+#include "clocks_and_modes.h"
+#include "stdio.h"
+#include "PORT.h"
+
+
+
+volatile uint32_t led_stop=0;
+
+volatile int32_t counter = 10;
+volatile uint32_t tval_ch0 = 40000000;
+
+void WDOG_disable (void){
+	WDOG->CNT=0xD928C520; 	/*Unlock watchdog*/
+	WDOG->TOVAL=0x0000FFFF; /*Maximum timeout value*/
+	WDOG->CS = 0x00002100; 	/*Disable watchdog*/
+}
+
+void LPIT0_Ch0_IRQHandler(void)
+{
+	ClearFlag_LPIT(channel_0); /* Clear channel 0 interrupt flag */
+	if(!led_stop)
+	{
+		Blink_RGB();
+	}
+}
+
+void LPIT0_Ch1_IRQHandler(void){
+	ClearFlag_LPIT(channel_1); /* Clear channel 1 interrupt flag */
+		if(counter>=20){
+			send_CAN_message(0xC0,0x01);
+		}
+		else if(counter<5){
+			send_CAN_message(0xD0,0x01);
+		}
+}
+
+void PORTC_IRQHandler(void) {
+	if(PORTC->ISFR & (1u<<Button1))
+	{
+		PORT_ClearFlag(PORTC,Button1); 					/* Clear PORTC interrupt flag */
+		Timer_LPIT_Init(channel_0, tval_ch0);			/*Channel 0 and tval= 40M hz*/
+		tval_ch0+=4000000;								/* Increase the blinking cycle 100ms */
+		counter++;
+	}
+	if(PORTC->ISFR & (1u<<Button2))
+	{
+		PORT_ClearFlag(PORTC,Button2); 					/* Clear interrupt flag */
+		// Toggle button2_hold flag when Button2 is pressed
+		led_stop = !led_stop;
+
+		Timer_LPIT_Init(channel_0, tval_ch0);
+		tval_ch0-=4000000;     							/* Decrease the blinking cycle 100ms */
+		counter--;										/*decrease the counter variable value by 1*/
+	}
+}
+void CAN0_ORed_0_15_MB_IRQHandler(void){
+	if(can_get_buff_flag(4)){
+		receive_CAN_message(4,0xA0, 0x01);        /*Reads CAN message from RX message buffer 4 , ID 0xC0, data 0x01*/
+	    led_stop=true;
+	}
+
+}
+
+int main(void)
+{
+	WDOG_disable();
+	Enable_Clock(); 			/* Enable clock SPLLDIV2_CLK source 40 Mhz */
+	Init_button(); 				/* Initialize Button1 as input and IRQ on rising edge,
+								Button2 as input  IRQ on either edge edge */
+	LED_Init();
+	FlexCAN_Init();         				/* Initializes the CAN module */
+	FlexCan_Port_Init();					/* Initializes TX, RX */
+	Timer_LPIT_Init(channel_0,tval_ch0);    /* Timer Channel 0 : 40M hz/40M hz = 1000ms period */
+	//Timer_LPIT_Init(channel_1,tval_ch0);    /* Timer Channel 1 : 40M hz/40M hz = 1000ms period */
+
+
+	can_rxbuff_init(4,0xA0);     /*Initializes message buffer for RX with message buffer 4, ID 0xA0*/
+
+    while (1)
+    {
+    	delay(1);
+    }
+	return 0;
+}
+
+
+
+
